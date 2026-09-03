@@ -112,6 +112,10 @@ fn cli() -> Command {
                 .arg_required_else_help(true),
         )
         .subcommand(
+            Command::new("list-interfaces")
+                .about("Debug: list every HID interface exposed by connected Apple devices matching the Studio Display vendor ID"),
+        )
+        .subcommand(
             Command::new("up")
                 .arg(
                     arg!(-s --step <STEP> "Step size in percent")
@@ -145,6 +149,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
 
     let hapi = HidApi::new()?;
+
+    if matches.subcommand_matches("list-interfaces").is_some() {
+        for x in hapi.device_list().filter(|x| x.vendor_id() == SD_VENDOR_ID) {
+            println!(
+                "product_id=0x{:04x} interface_number={} usage_page=0x{:04x} usage=0x{:04x} path={:?}",
+                x.product_id(),
+                x.interface_number(),
+                x.usage_page(),
+                x.usage(),
+                x.path()
+            );
+        }
+        return Ok(());
+    }
 
     let displays = studio_displays(&hapi)?;
     if displays.is_empty() {
