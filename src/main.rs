@@ -96,7 +96,12 @@ fn cli() -> Command {
         .arg(
             arg!(-v --verbose ... "Turn debugging information on")
         )
-        .subcommand(Command::new("get").about("Get the current brightness in %"))
+        .subcommand(
+            Command::new("get").about("Get the current brightness in %").arg(
+                arg!(-r --raw "Print the raw HID feature-report value instead of a percentage")
+                    .required(false),
+            ),
+        )
         .subcommand(
             Command::new("set")
                 .about("Set the current brightness in %")
@@ -160,9 +165,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         match matches.subcommand() {
-            Some(("get", _)) => {
-                let brightness = get_brightness_percent(&mut handle, max_brightness)?;
-                println!("brightness {}", brightness);
+            Some(("get", sub_matches)) => {
+                if sub_matches.get_flag("raw") {
+                    let raw = get_brightness(&mut handle)?;
+                    println!("raw {}", raw);
+                } else {
+                    let brightness = get_brightness_percent(&mut handle, max_brightness)?;
+                    println!("brightness {}", brightness);
+                }
             }
             Some(("set", sub_matches)) => {
                 let brightness = *sub_matches.get_one::<u8>("BRIGHTNESS").expect("required");
