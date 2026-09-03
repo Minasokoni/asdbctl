@@ -6,8 +6,6 @@ use std::{error::Error, vec::Vec};
 const REPORT_ID: u8 = 1;
 
 const MIN_BRIGHTNESS: u32 = 400;
-const MAX_BRIGHTNESS: u32 = 60000;
-const BRIGHTNESS_RANGE: u32 = MAX_BRIGHTNESS - MIN_BRIGHTNESS;
 
 const SD_VENDOR_ID: u16 = 0x05ac;
 const SD_INTERFACE_NR: i32 = 0x7;
@@ -16,6 +14,17 @@ const SD_PRODUCT_IDS: [u16; 3] = [
     0x1116, // Studio Display XDR (2026)
     0x1118, // Studio Display (2026)
 ];
+
+// The raw feature-report value that corresponds to 100% on macOS's own
+// brightness slider for each panel. This tracks the sustained full-screen
+// brightness spec (not the transient HDR peak), which is what macOS uses
+// for the slider ceiling.
+fn max_brightness_for(product_id: u16) -> u32 {
+    match product_id {
+        0x1116 => 100000, // Studio Display XDR (2026): 1000 nits sustained
+        _ => 60000,       // Studio Display (2022/2026): 600 nits
+    }
+}
 
 fn get_brightness(handle: &mut hidapi::HidDevice) -> Result<u32, Box<dyn Error>> {
     let mut buf = Vec::with_capacity(7); // report id, 4 bytes brightness, 2 bytes unknown
@@ -34,9 +43,13 @@ fn get_brightness(handle: &mut hidapi::HidDevice) -> Result<u32, Box<dyn Error>>
     Ok(brightness)
 }
 
-fn get_brightness_percent(handle: &mut hidapi::HidDevice) -> Result<u8, Box<dyn Error>> {
+fn get_brightness_percent(
+    handle: &mut hidapi::HidDevice,
+    max_brightness: u32,
+) -> Result<u8, Box<dyn Error>> {
+    let brightness_range = (max_brightness - MIN_BRIGHTNESS) as f32;
     let value = (get_brightness(handle)? - MIN_BRIGHTNESS) as f32;
-    let value_percent = (value / BRIGHTNESS_RANGE as f32 * 100.0) as u8;
+    let value_percent = (value / brightness_range * 100.0) as u8;
     Ok(value_percent)
 }
 
@@ -52,10 +65,11 @@ fn set_brightness(handle: &mut hidapi::HidDevice, brightness: u32) -> Result<(),
 fn set_brightness_percent(
     handle: &mut hidapi::HidDevice,
     brightness: u8,
+    max_brightness: u32,
 ) -> Result<(), Box<dyn Error>> {
-    let nits =
-        ((brightness as f32 * BRIGHTNESS_RANGE as f32) / 100.0 + MIN_BRIGHTNESS as f32) as u32;
-    let nits = std::cmp::min(nits, MAX_BRIGHTNESS);
+    let brightness_range = (max_brightness - MIN_BRIGHTNESS) as f32;
+    let nits = ((brightness as f32 * brightness_range) / 100.0 + MIN_BRIGHTNESS as f32) as u32;
+    let nits = std::cmp::min(nits, max_brightness);
     let nits = std::cmp::max(nits, MIN_BRIGHTNESS);
     set_brightness(handle, nits)?;
     Ok(())
@@ -134,6 +148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for display in displays {
         let mut handle = hapi.open_path(display.path())?;
+        let max_brightness = max_brightness_for(display.product_id());
         if let Some(s) = display.serial_number() {
             info!("display serial number {}", s);
         }
@@ -146,24 +161,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         match matches.subcommand() {
             Some(("get", _)) => {
-                let brightness = get_brightness_percent(&mut handle)?;
+                let brightness = get_brightness_percent(&mut handle, max_brightness)?;
                 println!("brightness {}", brightness);
             }
             Some(("set", sub_matches)) => {
                 let brightness = *sub_matches.get_one::<u8>("BRIGHTNESS").expect("required");
-                set_brightness_percent(&mut handle, brightness)?;
+                set_brightness_percent(&mut handle, brightness, max_brightness)?;
             }
             Some(("up", sub_matches)) => {
                 let step = *sub_matches.get_one::<u8>("step").expect("required");
-                let brightness = get_brightness_percent(&mut handle)?;
+                let brightness = get_brightness_percent(&mut handle, max_brightness)?;
                 let new_brightness = std::cmp::min(100, brightness + step);
-                set_brightness_percent(&mut handle, new_brightness)?;
+                set_brightness_percent(&mut handle, new_brightness, max_brightness)?;
             }
             Some(("down", sub_matches)) => {
                 let step = *sub_matches.get_one::<u8>("step").expect("required");
-                let brightness = get_brightness_percent(&mut handle)?;
+                let brightness = get_brightness_percent(&mut handle, max_brightness)?;
                 let new_brightness = std::cmp::max(0, brightness as i32 - step as i32) as u8;
-                set_brightness_percent(&mut handle, new_brightness)?;
+                set_brightness_percent(&mut handle, new_brightness, max_brightness)?;
             }
             _ => unreachable!(),
         }
