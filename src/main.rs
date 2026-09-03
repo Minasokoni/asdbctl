@@ -8,7 +8,15 @@ const REPORT_ID: u8 = 1;
 const MIN_BRIGHTNESS: u32 = 400;
 
 const SD_VENDOR_ID: u16 = 0x05ac;
-const SD_INTERFACE_NR: i32 = 0x7;
+// The brightness feature report lives on the standard USB HID "Monitor"
+// top-level collection (usage page 0x80, usage 0x01). The interface number
+// that collection shows up on isn't stable -- it was hardcoded to 7 (which
+// worked for the original Studio Display) but the Studio Display XDR
+// exposes it as interface 14 instead -- so match on usage page/usage,
+// which is a property of the HID report descriptor itself, not something
+// hidapi derives per-platform/per-device.
+const SD_USAGE_PAGE: u16 = 0x0080;
+const SD_USAGE: u16 = 0x0001;
 const SD_PRODUCT_IDS: [u16; 3] = [
     0x1114, // Studio Display (2022)
     0x1116, // Studio Display XDR (2026)
@@ -81,7 +89,8 @@ fn studio_displays(hapi: &HidApi) -> Result<Vec<&hidapi::DeviceInfo>, Box<dyn Er
         .filter(|x| {
             SD_PRODUCT_IDS.contains(&x.product_id())
                 && x.vendor_id() == SD_VENDOR_ID
-                && x.interface_number() == SD_INTERFACE_NR
+                && x.usage_page() == SD_USAGE_PAGE
+                && x.usage() == SD_USAGE
         })
         .collect())
 }
